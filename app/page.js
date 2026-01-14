@@ -106,15 +106,43 @@ export default function Boveda() {
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [copiedId, setCopiedId] = useState(null)
   
-  // 👁️ Estados para mostrar/ocultar passwords
+  // Estados para mostrar/ocultar passwords
   const [showMasterPassword, setShowMasterPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [showFormPassword, setShowFormPassword] = useState(false)
   const [visiblePasswords, setVisiblePasswords] = useState({})
   
+  // PWA Install
+  const [deferredPrompt, setDeferredPrompt] = useState(null)
+  const [showInstall, setShowInstall] = useState(false)
+  
   const [formData, setFormData] = useState({
     name: '', username: '', password: '', url: '', notes: ''
   })
+
+  // ============================================
+  // PWA INSTALL PROMPT
+  // ============================================
+
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+      setShowInstall(true)
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
+
+  const installApp = async () => {
+    if (!deferredPrompt) return
+    deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+    if (outcome === 'accepted') {
+      setShowInstall(false)
+    }
+    setDeferredPrompt(null)
+  }
 
   // ============================================
   // PERSISTENCIA
@@ -334,6 +362,17 @@ export default function Boveda() {
             <h1 className="text-3xl font-bold">Bóveda</h1>
             <p className="text-gray-400 mt-2">Contraseñas seguras, 100% local</p>
           </div>
+
+          {/* Install App Button */}
+          {showInstall && (
+            <button
+              onClick={installApp}
+              className="w-full bg-green-600 hover:bg-green-500 rounded-xl p-4 mb-4 flex items-center justify-center gap-2 transition-colors"
+            >
+              <span className="text-xl">📲</span>
+              <span className="font-semibold">Instalar App</span>
+            </button>
+          )}
           
           <div className="bg-gray-900 rounded-2xl p-6">
             {hasVault ? (
@@ -441,12 +480,23 @@ export default function Boveda() {
           <span className="text-2xl">🔓</span>
           <h1 className="text-xl font-bold">Bóveda</h1>
         </div>
-        <button
-          onClick={handleLock}
-          className="text-gray-400 hover:text-white transition-colors"
-        >
-          🔒 Bloquear
-        </button>
+        <div className="flex items-center gap-2">
+          {showInstall && (
+            <button
+              onClick={installApp}
+              className="text-gray-400 hover:text-white transition-colors"
+              title="Instalar App"
+            >
+              📲
+            </button>
+          )}
+          <button
+            onClick={handleLock}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            🔒 Bloquear
+          </button>
+        </div>
       </div>
 
       {/* Search + Add */}
@@ -580,7 +630,6 @@ export default function Boveda() {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-medium truncate">{entry.name}</h3>
                   <p className="text-gray-400 text-sm truncate">{entry.username}</p>
-                  {/* Password row with show/hide */}
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-gray-500 text-sm font-mono">
                       {visiblePasswords[entry.id] ? entry.password : '••••••••'}
