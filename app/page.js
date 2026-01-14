@@ -131,6 +131,7 @@ export default function Boveda() {
   const [qrEntry, setQrEntry] = useState(null)
   const [showLinkDevice, setShowLinkDevice] = useState(false)
   const [linkCode, setLinkCode] = useState("")
+  const [deviceId, setDeviceId] = useState("")
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [currentPwd, setCurrentPwd] = useState("")
   const [newPwd, setNewPwd] = useState("")
@@ -355,6 +356,7 @@ export default function Boveda() {
       setMasterPassword('')
       setShowMasterPassword(false)
       setLastActivity(Date.now())
+      setDeviceId(getUserId())
     } catch (err) {
       setError('Contraseña incorrecta')
       console.error(err)
@@ -471,6 +473,7 @@ export default function Boveda() {
   useEffect(() => {
     const stored = localStorage.getItem('boveda_vault')
     setHasVault(!!stored)
+    setDeviceId(localStorage.getItem("boveda_user_id") || "")
   }, [])
 
   // ============================================
@@ -903,10 +906,10 @@ export default function Boveda() {
             
             <div className="bg-gray-800 rounded-lg p-4 mb-4">
               <p className="text-xs text-gray-400 mb-2">Tu código de dispositivo:</p>
-              <p className="font-mono text-sm text-green-400 break-all select-all">{typeof window !== "undefined" ? localStorage.getItem("boveda_user_id") : ""}</p>
+              <p className="font-mono text-sm text-green-400 break-all select-all">{deviceId}</p>
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(localStorage.getItem("boveda_user_id") || "")
+                  navigator.clipboard.writeText(deviceId)
                   alert("Código copiado!")
                 }}
                 className="mt-2 w-full bg-gray-700 hover:bg-gray-600 rounded py-1 text-sm transition-colors"
