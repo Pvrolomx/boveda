@@ -3,6 +3,7 @@ import './globals.css'
 export const metadata = {
   title: 'Bóveda - Password Manager Local',
   description: 'Tus contraseñas seguras, 100% local',
+  manifest: '/manifest.json',
 }
 
 export default function RootLayout({ children }) {
