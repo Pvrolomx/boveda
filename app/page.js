@@ -301,7 +301,7 @@ export default function Boveda() {
     try {
       // Verificar si hay datos en la nube (dispositivo vinculado)
       const userId = localStorage.getItem("boveda_user_id")
-      addLog("Setup: userId=" + (userId ? userId.substring(0,15) + "..." : "NULL"))
+      // debug removed
       if (userId && supabase) {
         const { data: cloudData, error: cloudError } = await supabase
           .from('vaults')
@@ -309,9 +309,9 @@ export default function Boveda() {
           .eq('user_id', userId)
           .maybeSingle()
         
-        addLog("Setup: buscando en nube...")
-        addLog("Setup: " + (cloudData ? "✓ ENCONTRADO en nube" : "✗ NO encontrado"))
-        if (cloudError) addLog("Setup error: " + cloudError.message)
+        // debug removed
+        // debug removed
+        // debug removed
         
         if (cloudData && cloudData.encrypted_data) {
           // Hay datos en la nube, intentar descifrar con la contraseña ingresada
@@ -428,9 +428,9 @@ export default function Boveda() {
     if (!newUserId || newUserId.trim() === "") return
     
     // Guardar el nuevo user_id
-    addLog("Link: guardando " + newUserId.trim().substring(0,15) + "...")
+    // debug removed
     localStorage.setItem("boveda_user_id", newUserId.trim())
-    addLog("Link: verificado OK")
+    // debug removed
     
     // IMPORTANTE: Borrar vault local para que descargue de la nube
     localStorage.removeItem("boveda_vault")
@@ -782,15 +782,6 @@ export default function Boveda() {
           <p className="text-center text-gray-600 text-xs mt-6">
             Encriptación local + sync seguro en la nube
           </p>
-          
-          {debugLog.length > 0 && (
-            <div className="mt-4 bg-gray-800 rounded-lg p-3 text-xs font-mono">
-              <p className="text-gray-500 mb-1">Debug:</p>
-              {debugLog.map((log, i) => (
-                <p key={i} className="text-green-400">{log}</p>
-              ))}
-            </div>
-          )}
         </div>
       </main>
     )
