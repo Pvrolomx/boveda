@@ -698,13 +698,13 @@ export default function Boveda() {
             </button>
           )}
           <button
-          <button
             onClick={() => setShowChangePassword(true)}
             className="text-gray-400 hover:text-white transition-colors"
             title="Cambiar contraseña"
           >
             🔑
           </button>
+          <button
             onClick={() => setShowLinkDevice(true)}
             className="text-gray-400 hover:text-white transition-colors"
             title="Vincular dispositivo"
