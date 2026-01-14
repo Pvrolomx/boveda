@@ -296,6 +296,49 @@ export default function Boveda() {
     }
     
     try {
+      // Verificar si hay datos en la nube (dispositivo vinculado)
+      const userId = localStorage.getItem("boveda_user_id")
+      if (userId && supabase) {
+        const { data: cloudData } = await supabase
+          .from('vaults')
+          .select('encrypted_data, salt, updated_at')
+          .eq('user_id', userId)
+          .single()
+        
+        if (cloudData) {
+          // Hay datos en la nube, intentar descifrar con la contraseña ingresada
+          try {
+            const cloudSalt = Uint8Array.from(atob(cloudData.salt), c => c.charCodeAt(0))
+            const cloudKey = await deriveKey(masterPassword, cloudSalt)
+            const cloudEntries = await decrypt(cloudData.encrypted_data, cloudKey)
+            
+            // ¡Éxito! Guardar localmente y desbloquear
+            const encryptedData = await encrypt(cloudEntries, cloudKey)
+            const vaultData = {
+              data: encryptedData,
+              salt: cloudData.salt,
+              updated_at: cloudData.updated_at
+            }
+            localStorage.setItem('boveda_vault', JSON.stringify(vaultData))
+            
+            setSalt(cloudSalt)
+            setCryptoKey(cloudKey)
+            setEntries(cloudEntries)
+            setIsLocked(false)
+            setHasVault(true)
+            setMasterPassword('')
+            setConfirmPassword('')
+            setSyncStatus('✓ Sincronizado desde nube')
+            setTimeout(() => setSyncStatus(''), 2000)
+            return
+          } catch (decryptErr) {
+            setError('Contraseña incorrecta. Usa la misma del otro dispositivo.')
+            return
+          }
+        }
+      }
+      
+      // No hay datos en la nube, crear bóveda nueva
       const newSalt = generateSalt()
       const key = await deriveKey(masterPassword, newSalt)
       
@@ -379,11 +422,17 @@ export default function Boveda() {
     // Guardar el nuevo user_id
     localStorage.setItem("boveda_user_id", newUserId.trim())
     
+    // IMPORTANTE: Borrar vault local para que descargue de la nube
+    localStorage.removeItem("boveda_vault")
+    setHasVault(false)
+    
     // Recargar la app para que tome el nuevo ID
     setShowLinkDevice(false)
     setLinkCode("")
+    setShowScanner(false)
+    stopScanner()
     handleLock()
-    alert("Dispositivo vinculado. Desbloquea con tu contraseña maestra para sincronizar.")
+    alert("Dispositivo vinculado. Ahora crea tu bóveda con la MISMA contraseña maestra del otro dispositivo.")
   }
   const html5QrCodeRef = useRef(null)
 
