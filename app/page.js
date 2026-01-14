@@ -901,28 +901,23 @@ export default function Boveda() {
       {/* Link Device Modal */}
       {showLinkDevice && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
-            <h2 className="text-xl font-bold mb-4 text-center">🔗 Vincular Dispositivo</h2>
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm text-center">
+            <h2 className="text-xl font-bold mb-4">🔗 Vincular Dispositivo</h2>
             
-            <div className="bg-gray-800 rounded-lg p-4 mb-4">
-              <p className="text-xs text-gray-400 mb-2">Tu código de dispositivo:</p>
-              <p className="font-mono text-sm text-green-400 break-all select-all">{deviceId}</p>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(deviceId)
-                  alert("Código copiado!")
-                }}
-                className="mt-2 w-full bg-gray-700 hover:bg-gray-600 rounded py-1 text-sm transition-colors"
-              >
-                📋 Copiar código
-              </button>
-            </div>
+            {deviceId && (
+              <div className="mb-4">
+                <p className="text-xs text-gray-400 mb-3">Escanea este QR desde el otro dispositivo:</p>
+                <div className="bg-white p-4 rounded-xl inline-block">
+                  <QRCodeSVG value={deviceId} size={180} level="M" />
+                </div>
+              </div>
+            )}
             
-            <div className="border-t border-gray-700 pt-4">
-              <p className="text-xs text-gray-400 mb-2">¿Vincular con otro dispositivo?</p>
+            <div className="border-t border-gray-700 pt-4 mt-4">
+              <p className="text-xs text-gray-400 mb-2">O pega un código:</p>
               <input
                 type="text"
-                placeholder="Pega el código del otro dispositivo"
+                placeholder="Código del otro dispositivo"
                 value={linkCode}
                 onChange={(e) => setLinkCode(e.target.value)}
                 className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
