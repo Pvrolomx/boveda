@@ -423,7 +423,10 @@ export default function Boveda() {
 
   useEffect(() => {
     if (showScanner) {
-      const timer = setTimeout(() => startScanner(), 100)
+      const timer = setTimeout(() => {
+        const el = document.getElementById("qr-reader")
+        if (el) startScanner()
+      }, 500)
       return () => clearTimeout(timer)
     } else {
       stopScanner()
@@ -981,7 +984,14 @@ export default function Boveda() {
             {showScanner && (
               <div className="mb-4">
                 <p className="text-xs text-gray-400 mb-3">Apunta al QR del otro dispositivo:</p>
-                <div id="qr-reader" className="w-full rounded-xl overflow-hidden"></div>
+                <div id="qr-reader" className="w-full bg-gray-800 rounded-xl overflow-hidden" style={{ minHeight: "280px" }}></div>
+                <button
+                  type="button"
+                  onClick={startScanner}
+                  className="mt-2 w-full bg-green-600 hover:bg-green-500 rounded-lg py-2 text-sm transition-colors"
+                >
+                  🔄 Iniciar cámara
+                </button>
               </div>
             )}
             
