@@ -301,7 +301,7 @@ export default function Boveda() {
     try {
       // Verificar si hay datos en la nube (dispositivo vinculado)
       const userId = localStorage.getItem("boveda_user_id")
-      console.log("handleSetup - userId:", userId)
+      addLog("Setup: userId=" + (userId ? userId.substring(0,15) + "..." : "NULL"))
       if (userId && supabase) {
         const { data: cloudData, error: cloudError } = await supabase
           .from('vaults')
@@ -309,9 +309,9 @@ export default function Boveda() {
           .eq('user_id', userId)
           .maybeSingle()
         
-        console.log("handleSetup - userId buscado:", userId)
-        console.log("handleSetup - cloudData:", cloudData ? "ENCONTRADO" : "NO encontrado")
-        if (cloudError) console.log("handleSetup - cloudError:", cloudError)
+        addLog("Setup: buscando en nube...")
+        addLog("Setup: " + (cloudData ? "✓ ENCONTRADO en nube" : "✗ NO encontrado"))
+        if (cloudError) addLog("Setup error: " + cloudError.message)
         
         if (cloudData && cloudData.encrypted_data) {
           // Hay datos en la nube, intentar descifrar con la contraseña ingresada
@@ -428,9 +428,9 @@ export default function Boveda() {
     if (!newUserId || newUserId.trim() === "") return
     
     // Guardar el nuevo user_id
-    console.log("handleLinkDevice - saving userId:", newUserId.trim())
+    addLog("Link: guardando " + newUserId.trim().substring(0,15) + "...")
     localStorage.setItem("boveda_user_id", newUserId.trim())
-    console.log("handleLinkDevice - saved, verifying:", localStorage.getItem("boveda_user_id"))
+    addLog("Link: verificado OK")
     
     // IMPORTANTE: Borrar vault local para que descargue de la nube
     localStorage.removeItem("boveda_vault")
@@ -782,6 +782,15 @@ export default function Boveda() {
           <p className="text-center text-gray-600 text-xs mt-6">
             Encriptación local + sync seguro en la nube
           </p>
+          
+          {debugLog.length > 0 && (
+            <div className="mt-4 bg-gray-800 rounded-lg p-3 text-xs font-mono">
+              <p className="text-gray-500 mb-1">Debug:</p>
+              {debugLog.map((log, i) => (
+                <p key={i} className="text-green-400">{log}</p>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     )
