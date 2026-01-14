@@ -54,7 +54,6 @@ async function encrypt(data, key) {
     encoder.encode(JSON.stringify(data))
   )
   
-  // Combine IV + encrypted data
   const combined = new Uint8Array(iv.length + encrypted.byteLength)
   combined.set(iv)
   combined.set(new Uint8Array(encrypted), iv.length)
@@ -77,13 +76,6 @@ async function decrypt(encryptedBase64, key) {
   return JSON.parse(decoder.decode(decrypted))
 }
 
-// ============================================
-// ESTRUCTURAS DE DATOS
-// ============================================
-
-// PasswordEntry: { id, name, username, password, url, notes, createdAt, updatedAt }
-// VaultData: { entries: PasswordEntry[], salt: string (base64) }
-
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2)
 }
@@ -100,7 +92,6 @@ function generatePassword(length = 16) {
 // ============================================
 
 export default function Boveda() {
-  // Estados
   const [isLocked, setIsLocked] = useState(true)
   const [hasVault, setHasVault] = useState(false)
   const [masterPassword, setMasterPassword] = useState('')
@@ -115,7 +106,12 @@ export default function Boveda() {
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [copiedId, setCopiedId] = useState(null)
   
-  // Form states
+  // 👁️ Estados para mostrar/ocultar passwords
+  const [showMasterPassword, setShowMasterPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [showFormPassword, setShowFormPassword] = useState(false)
+  const [visiblePasswords, setVisiblePasswords] = useState({})
+  
   const [formData, setFormData] = useState({
     name: '', username: '', password: '', url: '', notes: ''
   })
@@ -167,6 +163,8 @@ export default function Boveda() {
       setHasVault(true)
       setMasterPassword('')
       setConfirmPassword('')
+      setShowMasterPassword(false)
+      setShowConfirmPassword(false)
       
       await saveData([], key, newSalt)
     } catch (err) {
@@ -197,6 +195,7 @@ export default function Boveda() {
       setEntries(decryptedEntries)
       setIsLocked(false)
       setMasterPassword('')
+      setShowMasterPassword(false)
       setLastActivity(Date.now())
     } catch (err) {
       setError('Contraseña incorrecta')
@@ -210,6 +209,7 @@ export default function Boveda() {
     setEntries([])
     setShowForm(false)
     setEditingId(null)
+    setVisiblePasswords({})
   }
 
   // ============================================
@@ -238,10 +238,6 @@ export default function Boveda() {
       clearInterval(interval)
     }
   }, [isLocked, lastActivity])
-
-  // ============================================
-  // CHECK VAULT ON LOAD
-  // ============================================
 
   useEffect(() => {
     const stored = localStorage.getItem('boveda_vault')
@@ -279,6 +275,7 @@ export default function Boveda() {
     
     setShowForm(false)
     setEditingId(null)
+    setShowFormPassword(false)
     setFormData({ name: '', username: '', password: '', url: '', notes: '' })
   }
 
@@ -291,6 +288,7 @@ export default function Boveda() {
       notes: entry.notes || ''
     })
     setEditingId(entry.id)
+    setShowFormPassword(false)
     setShowForm(true)
   }
 
@@ -310,11 +308,12 @@ export default function Boveda() {
 
   const handleGeneratePassword = () => {
     setFormData({ ...formData, password: generatePassword() })
+    setShowFormPassword(true)
   }
 
-  // ============================================
-  // FILTRADO
-  // ============================================
+  const togglePasswordVisibility = (id) => {
+    setVisiblePasswords(prev => ({ ...prev, [id]: !prev[id] }))
+  }
 
   const filteredEntries = entries.filter(entry =>
     entry.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -342,14 +341,23 @@ export default function Boveda() {
                 <label className="block text-sm text-gray-400 mb-2">
                   Contraseña maestra
                 </label>
-                <input
-                  type="password"
-                  value={masterPassword}
-                  onChange={(e) => setMasterPassword(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="••••••••"
-                  autoFocus
-                />
+                <div className="relative mb-4">
+                  <input
+                    type={showMasterPassword ? 'text' : 'password'}
+                    value={masterPassword}
+                    onChange={(e) => setMasterPassword(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="••••••••"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMasterPassword(!showMasterPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                  >
+                    {showMasterPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
                 {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
                 <button
                   type="submit"
@@ -366,24 +374,42 @@ export default function Boveda() {
                 <label className="block text-sm text-gray-400 mb-2">
                   Contraseña maestra
                 </label>
-                <input
-                  type="password"
-                  value={masterPassword}
-                  onChange={(e) => setMasterPassword(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Mínimo 8 caracteres"
-                  autoFocus
-                />
+                <div className="relative mb-4">
+                  <input
+                    type={showMasterPassword ? 'text' : 'password'}
+                    value={masterPassword}
+                    onChange={(e) => setMasterPassword(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Mínimo 8 caracteres"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMasterPassword(!showMasterPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                  >
+                    {showMasterPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
                 <label className="block text-sm text-gray-400 mb-2">
                   Confirmar contraseña
                 </label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Repite la contraseña"
-                />
+                <div className="relative mb-4">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Repite la contraseña"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                  >
+                    {showConfirmPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
                 {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
                 <button
                   type="submit"
@@ -436,6 +462,7 @@ export default function Boveda() {
           onClick={() => {
             setFormData({ name: '', username: '', password: '', url: '', notes: '' })
             setEditingId(null)
+            setShowFormPassword(false)
             setShowForm(true)
           }}
           className="bg-blue-600 hover:bg-blue-700 rounded-lg px-4 py-2 font-medium transition-colors"
@@ -470,14 +497,23 @@ export default function Boveda() {
                   required
                 />
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Contraseña"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="flex-1 bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
+                  <div className="relative flex-1">
+                    <input
+                      type={showFormPassword ? 'text' : 'password'}
+                      placeholder="Contraseña"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full bg-gray-800 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowFormPassword(!showFormPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    >
+                      {showFormPassword ? '🙈' : '👁️'}
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={handleGeneratePassword}
@@ -508,6 +544,7 @@ export default function Boveda() {
                   onClick={() => {
                     setShowForm(false)
                     setEditingId(null)
+                    setShowFormPassword(false)
                   }}
                   className="flex-1 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
                 >
@@ -543,6 +580,18 @@ export default function Boveda() {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-medium truncate">{entry.name}</h3>
                   <p className="text-gray-400 text-sm truncate">{entry.username}</p>
+                  {/* Password row with show/hide */}
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-gray-500 text-sm font-mono">
+                      {visiblePasswords[entry.id] ? entry.password : '••••••••'}
+                    </p>
+                    <button
+                      onClick={() => togglePasswordVisibility(entry.id)}
+                      className="text-gray-400 hover:text-white transition-colors text-xs"
+                    >
+                      {visiblePasswords[entry.id] ? '🙈' : '👁️'}
+                    </button>
+                  </div>
                 </div>
                 <div className="flex gap-1 ml-2">
                   <button
