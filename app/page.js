@@ -125,6 +125,11 @@ export default function Boveda() {
   // ============================================
 
   useEffect(() => {
+    // Registrar Service Worker
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {})
+    }
+    
     const handler = (e) => {
       e.preventDefault()
       setDeferredPrompt(e)
@@ -245,6 +250,11 @@ export default function Boveda() {
   // ============================================
 
   useEffect(() => {
+    // Registrar Service Worker
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {})
+    }
+    
     if (isLocked) return
     
     const resetActivity = () => setLastActivity(Date.now())
@@ -268,6 +278,11 @@ export default function Boveda() {
   }, [isLocked, lastActivity])
 
   useEffect(() => {
+    // Registrar Service Worker
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {})
+    }
+    
     const stored = localStorage.getItem('boveda_vault')
     setHasVault(!!stored)
   }, [])
