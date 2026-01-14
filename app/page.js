@@ -131,6 +131,11 @@ export default function Boveda() {
   const [qrEntry, setQrEntry] = useState(null)
   const [showLinkDevice, setShowLinkDevice] = useState(false)
   const [linkCode, setLinkCode] = useState("")
+  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [currentPwd, setCurrentPwd] = useState("")
+  const [newPwd, setNewPwd] = useState("")
+  const [confirmNewPwd, setConfirmNewPwd] = useState("")
+  const [changePwdError, setChangePwdError] = useState("")
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
   
@@ -376,6 +381,64 @@ export default function Boveda() {
     setLinkCode("")
     handleLock()
     alert("Dispositivo vinculado. Desbloquea con tu contraseña maestra para sincronizar.")
+  }
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault()
+    setChangePwdError("")
+    
+    // Validaciones
+    if (newPwd.length < 8) {
+      setChangePwdError("La nueva contraseña debe tener al menos 8 caracteres")
+      return
+    }
+    if (newPwd !== confirmNewPwd) {
+      setChangePwdError("Las contraseñas no coinciden")
+      return
+    }
+    
+    try {
+      // Verificar contraseña actual
+      const stored = localStorage.getItem("boveda_vault")
+      const vaultData = JSON.parse(stored)
+      const currentSalt = Uint8Array.from(atob(vaultData.salt), c => c.charCodeAt(0))
+      const currentKey = await deriveKey(currentPwd, currentSalt)
+      
+      // Intentar descifrar para verificar
+      await decrypt(vaultData.data, currentKey)
+      
+      // Generar nuevo salt y key
+      const newSalt = generateSalt()
+      const newKey = await deriveKey(newPwd, newSalt)
+      
+      // Re-encriptar con la nueva key
+      const encryptedData = await encrypt(entries, newKey)
+      const newVaultData = {
+        data: encryptedData,
+        salt: btoa(String.fromCharCode(...newSalt)),
+        updated_at: new Date().toISOString()
+      }
+      localStorage.setItem("boveda_vault", JSON.stringify(newVaultData))
+      
+      // Actualizar estados
+      setSalt(newSalt)
+      setCryptoKey(newKey)
+      
+      // Sync a la nube
+      if (supabase) {
+        await syncToCloud(entries, newSalt)
+      }
+      
+      // Limpiar y cerrar
+      setCurrentPwd("")
+      setNewPwd("")
+      setConfirmNewPwd("")
+      setShowChangePassword(false)
+      alert("Contraseña cambiada exitosamente!")
+    } catch (err) {
+      setChangePwdError("Contraseña actual incorrecta")
+      console.error(err)
+    }
   }
 
   // ============================================
@@ -635,6 +698,13 @@ export default function Boveda() {
             </button>
           )}
           <button
+          <button
+            onClick={() => setShowChangePassword(true)}
+            className="text-gray-400 hover:text-white transition-colors"
+            title="Cambiar contraseña"
+          >
+            🔑
+          </button>
             onClick={() => setShowLinkDevice(true)}
             className="text-gray-400 hover:text-white transition-colors"
             title="Vincular dispositivo"
@@ -756,6 +826,68 @@ export default function Boveda() {
                   className="flex-1 bg-blue-600 hover:bg-blue-700 rounded-lg py-2 font-medium transition-colors"
                 >
                   Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showChangePassword && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
+            <h2 className="text-xl font-bold mb-4 text-center">🔑 Cambiar Contraseña</h2>
+            <form onSubmit={handleChangePassword}>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Contraseña actual</label>
+                  <input
+                    type="password"
+                    value={currentPwd}
+                    onChange={(e) => setCurrentPwd(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Nueva contraseña</label>
+                  <input
+                    type="password"
+                    value={newPwd}
+                    onChange={(e) => setNewPwd(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Mínimo 8 caracteres"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Confirmar nueva contraseña</label>
+                  <input
+                    type="password"
+                    value={confirmNewPwd}
+                    onChange={(e) => setConfirmNewPwd(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Repite la nueva contraseña"
+                    required
+                  />
+                </div>
+              </div>
+              {changePwdError && <p className="text-red-400 text-sm mt-3">{changePwdError}</p>}
+              <div className="flex gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={() => { setShowChangePassword(false); setCurrentPwd(""); setNewPwd(""); setConfirmNewPwd(""); setChangePwdError(""); }}
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 rounded-lg py-2 font-medium transition-colors"
+                >
+                  Cambiar
                 </button>
               </div>
             </form>
