@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 
 // ============================================
@@ -131,6 +131,7 @@ export default function Boveda() {
   const [qrEntry, setQrEntry] = useState(null)
   const [showLinkDevice, setShowLinkDevice] = useState(false)
   const [linkCode, setLinkCode] = useState("")
+  const [showScanner, setShowScanner] = useState(false)
   const [deviceId, setDeviceId] = useState("")
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [currentPwd, setCurrentPwd] = useState("")
@@ -384,6 +385,52 @@ export default function Boveda() {
     handleLock()
     alert("Dispositivo vinculado. Desbloquea con tu contraseña maestra para sincronizar.")
   }
+  const html5QrCodeRef = useRef(null)
+
+  const startScanner = async () => {
+    try {
+      const { Html5Qrcode } = await import("html5-qrcode")
+      if (html5QrCodeRef.current) {
+        try { await html5QrCodeRef.current.stop() } catch(e) {}
+      }
+      const html5QrCode = new Html5Qrcode("qr-reader")
+      html5QrCodeRef.current = html5QrCode
+      await html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 200, height: 200 } },
+        (decodedText) => {
+          setLinkCode(decodedText)
+          stopScanner()
+          setShowScanner(false)
+        },
+        () => {}
+      )
+    } catch (err) {
+      console.error("Scanner error:", err)
+      alert("No se pudo acceder a la cámara")
+      setShowScanner(false)
+    }
+  }
+
+  const stopScanner = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        await html5QrCodeRef.current.stop()
+        html5QrCodeRef.current = null
+      } catch (err) {}
+    }
+  }
+
+  useEffect(() => {
+    if (showScanner) {
+      const timer = setTimeout(() => startScanner(), 100)
+      return () => clearTimeout(timer)
+    } else {
+      stopScanner()
+    }
+  }, [showScanner])
+
+
 
   const handleChangePassword = async (e) => {
     e.preventDefault()
@@ -904,15 +951,41 @@ export default function Boveda() {
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm text-center">
             <h2 className="text-xl font-bold mb-4">🔗 Vincular Dispositivo</h2>
             
-            {deviceId && (
+            {/* Toggle buttons */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setShowScanner(false)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${!showScanner ? 'bg-blue-600' : 'bg-gray-700'}`}
+              >
+                Mostrar QR
+              </button>
+              <button
+                onClick={() => setShowScanner(true)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${showScanner ? 'bg-blue-600' : 'bg-gray-700'}`}
+              >
+                📷 Escanear
+              </button>
+            </div>
+            
+            {/* QR Display */}
+            {!showScanner && deviceId && (
               <div className="mb-4">
-                <p className="text-xs text-gray-400 mb-3">Escanea este QR desde el otro dispositivo:</p>
+                <p className="text-xs text-gray-400 mb-3">Escanea desde el otro dispositivo:</p>
                 <div className="bg-white p-4 rounded-xl inline-block">
                   <QRCodeSVG value={deviceId} size={180} level="M" />
                 </div>
               </div>
             )}
             
+            {/* Scanner */}
+            {showScanner && (
+              <div className="mb-4">
+                <p className="text-xs text-gray-400 mb-3">Apunta al QR del otro dispositivo:</p>
+                <div id="qr-reader" className="w-full rounded-xl overflow-hidden"></div>
+              </div>
+            )}
+            
+            {/* Manual input */}
             <div className="border-t border-gray-700 pt-4 mt-4">
               <p className="text-xs text-gray-400 mb-2">O pega un código:</p>
               <input
@@ -923,7 +996,7 @@ export default function Boveda() {
                 className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
-                onClick={() => handleLinkDevice(linkCode)}
+                onClick={() => { handleLinkDevice(linkCode); stopScanner(); }}
                 disabled={!linkCode.trim()}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:opacity-50 rounded-lg py-2 font-medium transition-colors"
               >
@@ -932,7 +1005,7 @@ export default function Boveda() {
             </div>
             
             <button
-              onClick={() => { setShowLinkDevice(false); setLinkCode(""); }}
+              onClick={() => { setShowLinkDevice(false); setLinkCode(""); setShowScanner(false); stopScanner(); }}
               className="w-full mt-4 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
             >
               Cerrar
