@@ -635,13 +635,13 @@ export default function Boveda() {
             </button>
           )}
           <button
-          <button
             onClick={() => setShowLinkDevice(true)}
             className="text-gray-400 hover:text-white transition-colors"
             title="Vincular dispositivo"
           >
             🔗
           </button>
+          <button
             onClick={handleLock}
             className="text-gray-400 hover:text-white transition-colors"
           >
