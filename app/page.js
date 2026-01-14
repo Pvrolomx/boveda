@@ -301,14 +301,19 @@ export default function Boveda() {
     try {
       // Verificar si hay datos en la nube (dispositivo vinculado)
       const userId = localStorage.getItem("boveda_user_id")
+      console.log("handleSetup - userId:", userId)
       if (userId && supabase) {
-        const { data: cloudData } = await supabase
+        const { data: cloudData, error: cloudError } = await supabase
           .from('vaults')
           .select('encrypted_data, salt, updated_at')
           .eq('user_id', userId)
-          .single()
+          .maybeSingle()
         
-        if (cloudData) {
+        console.log("handleSetup - userId buscado:", userId)
+        console.log("handleSetup - cloudData:", cloudData ? "ENCONTRADO" : "NO encontrado")
+        if (cloudError) console.log("handleSetup - cloudError:", cloudError)
+        
+        if (cloudData && cloudData.encrypted_data) {
           // Hay datos en la nube, intentar descifrar con la contraseña ingresada
           try {
             const cloudSalt = Uint8Array.from(atob(cloudData.salt), c => c.charCodeAt(0))
@@ -423,7 +428,9 @@ export default function Boveda() {
     if (!newUserId || newUserId.trim() === "") return
     
     // Guardar el nuevo user_id
+    console.log("handleLinkDevice - saving userId:", newUserId.trim())
     localStorage.setItem("boveda_user_id", newUserId.trim())
+    console.log("handleLinkDevice - saved, verifying:", localStorage.getItem("boveda_user_id"))
     
     // IMPORTANTE: Borrar vault local para que descargue de la nube
     localStorage.removeItem("boveda_vault")
