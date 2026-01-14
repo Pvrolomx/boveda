@@ -1,0 +1,21 @@
+{
+  "name": "Bóveda - Gestor de Contraseñas",
+  "short_name": "Bóveda",
+  "description": "Contraseñas seguras, 100% local",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
