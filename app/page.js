@@ -129,6 +129,8 @@ export default function Boveda() {
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [copiedId, setCopiedId] = useState(null)
   const [qrEntry, setQrEntry] = useState(null)
+  const [showLinkDevice, setShowLinkDevice] = useState(false)
+  const [linkCode, setLinkCode] = useState("")
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
   
@@ -361,6 +363,19 @@ export default function Boveda() {
     setShowForm(false)
     setEditingId(null)
     setVisiblePasswords({})
+  }
+
+  const handleLinkDevice = async (newUserId) => {
+    if (!newUserId || newUserId.trim() === "") return
+    
+    // Guardar el nuevo user_id
+    localStorage.setItem("boveda_user_id", newUserId.trim())
+    
+    // Recargar la app para que tome el nuevo ID
+    setShowLinkDevice(false)
+    setLinkCode("")
+    handleLock()
+    alert("Dispositivo vinculado. Desbloquea con tu contraseña maestra para sincronizar.")
   }
 
   // ============================================
@@ -620,6 +635,13 @@ export default function Boveda() {
             </button>
           )}
           <button
+          <button
+            onClick={() => setShowLinkDevice(true)}
+            className="text-gray-400 hover:text-white transition-colors"
+            title="Vincular dispositivo"
+          >
+            🔗
+          </button>
             onClick={handleLock}
             className="text-gray-400 hover:text-white transition-colors"
           >
@@ -737,6 +759,54 @@ export default function Boveda() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Link Device Modal */}
+      {showLinkDevice && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
+            <h2 className="text-xl font-bold mb-4 text-center">🔗 Vincular Dispositivo</h2>
+            
+            <div className="bg-gray-800 rounded-lg p-4 mb-4">
+              <p className="text-xs text-gray-400 mb-2">Tu código de dispositivo:</p>
+              <p className="font-mono text-sm text-green-400 break-all select-all">{typeof window !== "undefined" ? localStorage.getItem("boveda_user_id") : ""}</p>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(localStorage.getItem("boveda_user_id") || "")
+                  alert("Código copiado!")
+                }}
+                className="mt-2 w-full bg-gray-700 hover:bg-gray-600 rounded py-1 text-sm transition-colors"
+              >
+                📋 Copiar código
+              </button>
+            </div>
+            
+            <div className="border-t border-gray-700 pt-4">
+              <p className="text-xs text-gray-400 mb-2">¿Vincular con otro dispositivo?</p>
+              <input
+                type="text"
+                placeholder="Pega el código del otro dispositivo"
+                value={linkCode}
+                onChange={(e) => setLinkCode(e.target.value)}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => handleLinkDevice(linkCode)}
+                disabled={!linkCode.trim()}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:opacity-50 rounded-lg py-2 font-medium transition-colors"
+              >
+                Vincular
+              </button>
+            </div>
+            
+            <button
+              onClick={() => { setShowLinkDevice(false); setLinkCode(""); }}
+              className="w-full mt-4 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}
