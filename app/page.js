@@ -2,6 +2,18 @@
 import { useState, useEffect, useCallback } from 'react'
 
 // ============================================
+// SUPABASE CLIENT
+// ============================================
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+const supabase = supabaseUrl && supabaseAnonKey 
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null
+
+// ============================================
 // CONSTANTES CRYPTO
 // ============================================
 const SALT_LENGTH = 16
@@ -87,6 +99,16 @@ function generatePassword(length = 16) {
   return Array.from(array, b => chars[b % chars.length]).join('')
 }
 
+// Obtener o crear user ID único para este usuario
+function getUserId() {
+  let userId = localStorage.getItem('boveda_user_id')
+  if (!userId) {
+    userId = 'user_' + generateId()
+    localStorage.setItem('boveda_user_id', userId)
+  }
+  return userId
+}
+
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
@@ -105,6 +127,8 @@ export default function Boveda() {
   const [searchTerm, setSearchTerm] = useState('')
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [copiedId, setCopiedId] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState('')
   
   // Estados para mostrar/ocultar passwords
   const [showMasterPassword, setShowMasterPassword] = useState(false)
@@ -150,6 +174,75 @@ export default function Boveda() {
   }
 
   // ============================================
+  // SYNC FUNCTIONS
+  // ============================================
+
+  const syncToCloud = async (entriesToSave, saltBytes) => {
+    if (!supabase) return
+    
+    try {
+      setSyncing(true)
+      const userId = getUserId()
+      const encryptedData = await encrypt(entriesToSave, cryptoKey)
+      const saltBase64 = btoa(String.fromCharCode(...saltBytes))
+      
+      const { error } = await supabase
+        .from('vaults')
+        .upsert({
+          user_id: userId,
+          encrypted_data: encryptedData,
+          salt: saltBase64,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id'
+        })
+      
+      if (error) throw error
+      setSyncStatus('✓ Sincronizado')
+      setTimeout(() => setSyncStatus(''), 2000)
+    } catch (err) {
+      console.error('Sync error:', err)
+      setSyncStatus('⚠ Error sync')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const loadFromCloud = async (key, saltBytes) => {
+    if (!supabase) return null
+    
+    try {
+      const userId = getUserId()
+      const { data, error } = await supabase
+        .from('vaults')
+        .select('encrypted_data, salt, updated_at')
+        .eq('user_id', userId)
+        .single()
+      
+      if (error || !data) return null
+      
+      // Comparar con local para ver cuál es más reciente
+      const localData = localStorage.getItem('boveda_vault')
+      if (localData) {
+        const local = JSON.parse(localData)
+        const localTime = new Date(local.updated_at || 0).getTime()
+        const cloudTime = new Date(data.updated_at).getTime()
+        
+        if (localTime > cloudTime) {
+          // Local es más reciente, sincronizar a la nube
+          return null
+        }
+      }
+      
+      const decrypted = await decrypt(data.encrypted_data, key)
+      return decrypted
+    } catch (err) {
+      console.error('Load from cloud error:', err)
+      return null
+    }
+  }
+
+  // ============================================
   // PERSISTENCIA
   // ============================================
 
@@ -158,14 +251,20 @@ export default function Boveda() {
       const encryptedData = await encrypt(entriesToSave, key)
       const vaultData = {
         data: encryptedData,
-        salt: btoa(String.fromCharCode(...saltBytes))
+        salt: btoa(String.fromCharCode(...saltBytes)),
+        updated_at: new Date().toISOString()
       }
       localStorage.setItem('boveda_vault', JSON.stringify(vaultData))
+      
+      // Sync to cloud
+      if (supabase && key) {
+        await syncToCloud(entriesToSave, saltBytes)
+      }
     } catch (err) {
       console.error('Error saving:', err)
       setError('Error al guardar')
     }
-  }, [])
+  }, [cryptoKey])
 
   // ============================================
   // SETUP Y UNLOCK
@@ -221,7 +320,24 @@ export default function Boveda() {
       const saltBytes = Uint8Array.from(atob(vaultData.salt), c => c.charCodeAt(0))
       const key = await deriveKey(masterPassword, saltBytes)
       
-      const decryptedEntries = await decrypt(vaultData.data, key)
+      // Primero intentar descifrar local para validar password
+      let decryptedEntries = await decrypt(vaultData.data, key)
+      
+      // Luego intentar cargar de la nube si hay datos más recientes
+      const cloudEntries = await loadFromCloud(key, saltBytes)
+      if (cloudEntries) {
+        decryptedEntries = cloudEntries
+        // Actualizar local con datos de la nube
+        const encryptedData = await encrypt(cloudEntries, key)
+        const newVaultData = {
+          data: encryptedData,
+          salt: vaultData.salt,
+          updated_at: new Date().toISOString()
+        }
+        localStorage.setItem('boveda_vault', JSON.stringify(newVaultData))
+        setSyncStatus('✓ Sincronizado desde nube')
+        setTimeout(() => setSyncStatus(''), 2000)
+      }
       
       setSalt(saltBytes)
       setCryptoKey(key)
@@ -250,11 +366,6 @@ export default function Boveda() {
   // ============================================
 
   useEffect(() => {
-    // Registrar Service Worker
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {})
-    }
-    
     if (isLocked) return
     
     const resetActivity = () => setLastActivity(Date.now())
@@ -278,11 +389,6 @@ export default function Boveda() {
   }, [isLocked, lastActivity])
 
   useEffect(() => {
-    // Registrar Service Worker
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {})
-    }
-    
     const stored = localStorage.getItem('boveda_vault')
     setHasVault(!!stored)
   }, [])
@@ -375,7 +481,7 @@ export default function Boveda() {
           <div className="text-center mb-8">
             <div className="text-6xl mb-4">🔐</div>
             <h1 className="text-3xl font-bold">Bóveda</h1>
-            <p className="text-gray-400 mt-2">Contraseñas seguras, 100% local</p>
+            <p className="text-gray-400 mt-2">Contraseñas seguras con sync ☁️</p>
           </div>
 
           {/* Install App Button */}
@@ -476,7 +582,7 @@ export default function Boveda() {
           </div>
           
           <p className="text-center text-gray-600 text-xs mt-6">
-            Tus datos nunca salen de este dispositivo
+            Encriptación local + sync seguro en la nube
           </p>
         </div>
       </main>
@@ -494,6 +600,12 @@ export default function Boveda() {
         <div className="flex items-center gap-3">
           <span className="text-2xl">🔓</span>
           <h1 className="text-xl font-bold">Bóveda</h1>
+          {syncStatus && (
+            <span className="text-xs text-green-400">{syncStatus}</span>
+          )}
+          {syncing && (
+            <span className="text-xs text-gray-400">☁️ Sincronizando...</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {showInstall && (
@@ -702,7 +814,7 @@ export default function Boveda() {
 
       {/* Footer */}
       <div className="text-center text-gray-600 text-xs mt-8">
-        <p>Auto-bloqueo en {AUTO_LOCK_MINUTES} min de inactividad</p>
+        <p>Auto-bloqueo en {AUTO_LOCK_MINUTES} min · Sync ☁️ activo</p>
         <p className="mt-1">Creado por C-Cloud | Colmena 2026</p>
       </div>
     </main>
