@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 
 // ============================================
 // SUPABASE CLIENT
@@ -127,6 +128,7 @@ export default function Boveda() {
   const [searchTerm, setSearchTerm] = useState('')
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [copiedId, setCopiedId] = useState(null)
+  const [qrEntry, setQrEntry] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
   
@@ -739,6 +741,30 @@ export default function Boveda() {
         </div>
       )}
 
+      {/* QR Modal */}
+      {qrEntry && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm text-center">
+            <h2 className="text-xl font-bold mb-2">{qrEntry.name}</h2>
+            <p className="text-gray-400 text-sm mb-4">{qrEntry.username}</p>
+            <div className="bg-white p-4 rounded-xl inline-block mb-4">
+              <QRCodeSVG
+                value={`${qrEntry.username}\n${qrEntry.password}`}
+                size={200}
+                level="M"
+              />
+            </div>
+            <p className="text-gray-500 text-xs mb-4">Escanea para copiar usuario y contraseña</p>
+            <button
+              onClick={() => setQrEntry(null)}
+              className="w-full bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Entries List */}
       <div className="space-y-2">
         {filteredEntries.length === 0 ? (
@@ -780,6 +806,13 @@ export default function Boveda() {
                     title="Copiar contraseña"
                   >
                     {copiedId === entry.id ? '✓' : '📋'}
+                  </button>
+                  <button
+                    onClick={() => setQrEntry(entry)}
+                    className="p-2 bg-gray-700 hover:bg-purple-600 rounded-lg transition-colors"
+                    title="Mostrar QR"
+                  >
+                    📱
                   </button>
                   <button
                     onClick={() => handleEdit(entry)}
