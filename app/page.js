@@ -188,13 +188,16 @@ export default function Boveda() {
   // SYNC FUNCTIONS
   // ============================================
 
-  const syncToCloud = async (entriesToSave, saltBytes) => {
+  const syncToCloud = async (entriesToSave, saltBytes, key = null) => {
     if (!supabase) return
+    
+    const keyToUse = key || cryptoKey
+    if (!keyToUse) return
     
     try {
       setSyncing(true)
       const userId = getUserId()
-      const encryptedData = await encrypt(entriesToSave, cryptoKey)
+      const encryptedData = await encrypt(entriesToSave, keyToUse)
       const saltBase64 = btoa(String.fromCharCode(...saltBytes))
       
       const { error } = await supabase
@@ -269,7 +272,7 @@ export default function Boveda() {
       
       // Sync to cloud
       if (supabase && key) {
-        await syncToCloud(entriesToSave, saltBytes)
+        await syncToCloud(entriesToSave, saltBytes, key)
       }
     } catch (err) {
       console.error('Error saving:', err)
@@ -527,7 +530,7 @@ export default function Boveda() {
       
       // Sync a la nube
       if (supabase) {
-        await syncToCloud(entries, newSalt)
+        await syncToCloud(entries, newSalt, newKey)
       }
       
       // Limpiar y cerrar
@@ -572,7 +575,13 @@ export default function Boveda() {
   useEffect(() => {
     const stored = localStorage.getItem('boveda_vault')
     setHasVault(!!stored)
-    setDeviceId(localStorage.getItem("boveda_user_id") || "")
+    // Asegurar que siempre hay un deviceId
+    let uid = localStorage.getItem("boveda_user_id")
+    if (!uid) {
+      uid = "user_" + Date.now().toString(36) + Math.random().toString(36).substr(2)
+      localStorage.setItem("boveda_user_id", uid)
+    }
+    setDeviceId(uid)
   }, [])
 
   // ============================================
