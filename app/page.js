@@ -238,11 +238,39 @@ export default function Boveda() {
       // Convertir a string compacto
       const exportString = btoa(JSON.stringify(exportPackage))
       setExportData(exportString)
-      setTransferStatus(`✅ QR listo (${Math.round(exportString.length/1024*10)/10}KB)`)
+      setTransferStatus(`✅ Listo (${Math.round(exportString.length/1024*10)/10}KB)`)
     } catch (err) {
       setTransferStatus('❌ Error al exportar')
       console.error(err)
     }
+  }
+
+  const handleDownloadFile = () => {
+    if (!exportData) {
+      handleExport()
+      return
+    }
+    const blob = new Blob([exportData], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `boveda-${new Date().toISOString().slice(0,10)}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    setTransferStatus('✅ Archivo descargado')
+  }
+
+  const handleFileImport = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      setImportCode(event.target.result)
+      setTransferStatus('✅ Archivo cargado - Click Importar')
+    }
+    reader.readAsText(file)
   }
 
   const handleImport = async () => {
@@ -954,32 +982,43 @@ export default function Boveda() {
             {transferMode === 'export' ? (
               <div>
                 <p className="text-gray-400 text-sm text-center mb-4">
-                  Escanea este QR desde el otro dispositivo
+                  Descarga el archivo y pásalo al otro dispositivo
                 </p>
                 {exportData ? (
-                  <div className="flex flex-col items-center">
-                    {exportData.length < 2500 ? (
-                      <div className="bg-white p-4 rounded-xl mb-4">
-                        <QRCodeSVG value={exportData} size={220} level="M" />
-                      </div>
-                    ) : (
-                      <div className="bg-gray-800 p-4 rounded-xl mb-4 text-center">
-                        <p className="text-yellow-400 text-sm mb-2">⚠️ Datos muy grandes para QR</p>
-                        <p className="text-gray-400 text-xs">Usa "Copiar código" abajo</p>
-                      </div>
-                    )}
-                    <p className="text-xs text-gray-500 mb-2">
+                  <div className="flex flex-col items-center gap-3">
+                    {/* Botón principal: Descargar archivo */}
+                    <button
+                      onClick={handleDownloadFile}
+                      className="w-full bg-green-600 hover:bg-green-700 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      📥 Descargar archivo
+                    </button>
+                    
+                    <p className="text-xs text-gray-500">
                       {entries.length} contraseña(s) · {Math.round(exportData.length/1024*10)/10}KB
                     </p>
+                    
+                    <p className="text-xs text-gray-600 text-center">
+                      Envía el archivo por WhatsApp, AirDrop, Email o Drive
+                    </p>
+                    
+                    {/* QR solo si cabe */}
+                    {exportData.length < 2500 && (
+                      <div className="border-t border-gray-700 pt-4 mt-2 w-full">
+                        <p className="text-xs text-gray-400 text-center mb-2">O escanea este QR:</p>
+                        <div className="bg-white p-3 rounded-xl mx-auto w-fit">
+                          <QRCodeSVG value={exportData} size={180} level="M" />
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Copiar código como último recurso */}
                     <button
-                      onClick={() => { navigator.clipboard.writeText(exportData); setTransferStatus('✅ Código copiado al portapapeles'); }}
-                      className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      onClick={() => { navigator.clipboard.writeText(exportData); setTransferStatus('✅ Código copiado'); }}
+                      className="text-sm text-blue-400 hover:text-blue-300"
                     >
                       📋 Copiar código
                     </button>
-                    <p className="text-xs text-gray-600 mt-2">
-                      Pega este código en el otro dispositivo
-                    </p>
                   </div>
                 ) : (
                   <p className="text-center text-gray-500">Generando...</p>
@@ -988,15 +1027,27 @@ export default function Boveda() {
             ) : (
               <div>
                 <p className="text-gray-400 text-sm text-center mb-4">
-                  Escanea el QR del otro dispositivo
+                  Selecciona el archivo descargado del otro dispositivo
                 </p>
                 
+                {/* Botón principal: Seleccionar archivo */}
+                <label className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2 cursor-pointer mb-4">
+                  📂 Seleccionar archivo
+                  <input
+                    type="file"
+                    accept=".txt,.json"
+                    onChange={handleFileImport}
+                    className="hidden"
+                  />
+                </label>
+                
+                {/* Escanear QR como alternativa */}
                 {!showScanner ? (
                   <button
                     onClick={() => setShowScanner(true)}
-                    className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2 mb-4"
+                    className="w-full bg-gray-700 hover:bg-gray-600 rounded-xl py-2 text-sm transition-colors flex items-center justify-center gap-2 mb-4"
                   >
-                    📷 Escanear QR
+                    📷 O escanear QR
                   </button>
                 ) : (
                   <div className="mb-4">
@@ -1010,22 +1061,25 @@ export default function Boveda() {
                   </div>
                 )}
                 
-                <div className="border-t border-gray-700 pt-4 mt-4">
+                {/* Área de texto para pegar código */}
+                <div className="border-t border-gray-700 pt-4 mt-2">
                   <p className="text-xs text-gray-400 mb-2">O pega el código:</p>
                   <textarea
-                    placeholder="Pega aquí..."
+                    placeholder="Pega aquí el código..."
                     value={importCode}
                     onChange={(e) => setImportCode(e.target.value)}
                     className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <button
-                    onClick={handleImport}
-                    disabled={!importCode.trim()}
-                    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:opacity-50 rounded-lg py-2 font-medium"
-                  >
-                    Importar (reemplaza todo)
-                  </button>
                 </div>
+                
+                {/* Botón Importar */}
+                <button
+                  onClick={handleImport}
+                  disabled={!importCode.trim()}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:opacity-50 rounded-xl py-3 font-medium mt-2"
+                >
+                  ⚡ Importar (reemplaza todo)
+                </button>
               </div>
             )}
             
