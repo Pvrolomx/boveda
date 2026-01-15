@@ -958,21 +958,31 @@ export default function Boveda() {
                 </p>
                 {exportData ? (
                   <div className="flex flex-col items-center">
-                    <div className="bg-white p-4 rounded-xl mb-4">
-                      <QRCodeSVG value={exportData} size={220} level="L" />
-                    </div>
+                    {exportData.length < 2500 ? (
+                      <div className="bg-white p-4 rounded-xl mb-4">
+                        <QRCodeSVG value={exportData} size={220} level="M" />
+                      </div>
+                    ) : (
+                      <div className="bg-gray-800 p-4 rounded-xl mb-4 text-center">
+                        <p className="text-yellow-400 text-sm mb-2">⚠️ Datos muy grandes para QR</p>
+                        <p className="text-gray-400 text-xs">Usa "Copiar código" abajo</p>
+                      </div>
+                    )}
                     <p className="text-xs text-gray-500 mb-2">
                       {entries.length} contraseña(s) · {Math.round(exportData.length/1024*10)/10}KB
                     </p>
                     <button
-                      onClick={() => { navigator.clipboard.writeText(exportData); setTransferStatus('✅ Código copiado'); }}
-                      className="text-sm text-blue-400 hover:text-blue-300"
+                      onClick={() => { navigator.clipboard.writeText(exportData); setTransferStatus('✅ Código copiado al portapapeles'); }}
+                      className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                     >
                       📋 Copiar código
                     </button>
+                    <p className="text-xs text-gray-600 mt-2">
+                      Pega este código en el otro dispositivo
+                    </p>
                   </div>
                 ) : (
-                  <p className="text-center text-gray-500">Generando QR...</p>
+                  <p className="text-center text-gray-500">Generando...</p>
                 )}
               </div>
             ) : (
