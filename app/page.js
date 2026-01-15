@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 
 // ============================================
-// SUPABASE CLIENT
+// SUPABASE CLIENT (opcional, mantener compatibilidad)
 // ============================================
 import { createClient } from '@supabase/supabase-js'
 
@@ -100,7 +100,6 @@ function generatePassword(length = 16) {
   return Array.from(array, b => chars[b % chars.length]).join('')
 }
 
-// Obtener o crear user ID único para este usuario
 function getUserId() {
   let userId = localStorage.getItem('boveda_user_id')
   if (!userId) {
@@ -129,10 +128,6 @@ export default function Boveda() {
   const [lastActivity, setLastActivity] = useState(Date.now())
   const [copiedId, setCopiedId] = useState(null)
   const [qrEntry, setQrEntry] = useState(null)
-  const [showLinkDevice, setShowLinkDevice] = useState(false)
-  const [linkCode, setLinkCode] = useState("")
-  const [showScanner, setShowScanner] = useState(false)
-  const [deviceId, setDeviceId] = useState("")
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [currentPwd, setCurrentPwd] = useState("")
   const [newPwd, setNewPwd] = useState("")
@@ -140,6 +135,14 @@ export default function Boveda() {
   const [changePwdError, setChangePwdError] = useState("")
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
+  
+  // Estados para Export/Import
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [transferMode, setTransferMode] = useState('export') // 'export' | 'import'
+  const [exportData, setExportData] = useState('')
+  const [importCode, setImportCode] = useState('')
+  const [showScanner, setShowScanner] = useState(false)
+  const [transferStatus, setTransferStatus] = useState('')
   
   // Estados para mostrar/ocultar passwords
   const [showMasterPassword, setShowMasterPassword] = useState(false)
@@ -155,12 +158,13 @@ export default function Boveda() {
     name: '', username: '', password: '', url: '', notes: ''
   })
 
+  const html5QrCodeRef = useRef(null)
+
   // ============================================
-  // PWA INSTALL PROMPT
+  // EFFECTS
   // ============================================
 
   useEffect(() => {
-    // Registrar Service Worker
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {})
     }
@@ -184,267 +188,99 @@ export default function Boveda() {
     setDeferredPrompt(null)
   }
 
-  // ============================================
-  // SYNC FUNCTIONS
-  // ============================================
+  useEffect(() => {
+    const vaultExists = localStorage.getItem('boveda_vault')
+    setHasVault(!!vaultExists)
+  }, [])
 
-  const syncToCloud = async (entriesToSave, saltBytes, key = null) => {
-    if (!supabase) return
-    
-    const keyToUse = key || cryptoKey
-    if (!keyToUse) return
-    
-    try {
-      setSyncing(true)
-      const userId = getUserId()
-      const encryptedData = await encrypt(entriesToSave, keyToUse)
-      const saltBase64 = btoa(String.fromCharCode(...saltBytes))
-      
-      const { error } = await supabase
-        .from('vaults')
-        .upsert({
-          user_id: userId,
-          encrypted_data: encryptedData,
-          salt: saltBase64,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        })
-      
-      if (error) throw error
-      setSyncStatus('✓ Sincronizado')
-      setTimeout(() => setSyncStatus(''), 2000)
-    } catch (err) {
-      console.error('Sync error:', err)
-      setSyncStatus('⚠ Error sync')
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  const loadFromCloud = async (key, saltBytes) => {
-    if (!supabase) return null
-    
-    try {
-      const userId = getUserId()
-      const { data, error } = await supabase
-        .from('vaults')
-        .select('encrypted_data, salt, updated_at')
-        .eq('user_id', userId)
-        .single()
-      
-      if (error || !data) return null
-      
-      // Comparar con local para ver cuál es más reciente
-      const localData = localStorage.getItem('boveda_vault')
-      if (localData) {
-        const local = JSON.parse(localData)
-        const localTime = new Date(local.updated_at || 0).getTime()
-        const cloudTime = new Date(data.updated_at).getTime()
-        
-        if (localTime > cloudTime) {
-          // Local es más reciente, sincronizar a la nube
-          return null
+  useEffect(() => {
+    if (!isLocked) {
+      const interval = setInterval(() => {
+        if (Date.now() - lastActivity > AUTO_LOCK_MINUTES * 60 * 1000) {
+          handleLock()
         }
+      }, 10000)
+      return () => clearInterval(interval)
+    }
+  }, [isLocked, lastActivity])
+
+  useEffect(() => {
+    const handleActivity = () => setLastActivity(Date.now())
+    window.addEventListener('click', handleActivity)
+    window.addEventListener('keydown', handleActivity)
+    return () => {
+      window.removeEventListener('click', handleActivity)
+      window.removeEventListener('keydown', handleActivity)
+    }
+  }, [])
+
+  // ============================================
+  // EXPORT/IMPORT FUNCTIONS
+  // ============================================
+
+  const handleExport = () => {
+    const vaultData = localStorage.getItem('boveda_vault')
+    if (!vaultData) {
+      setTransferStatus('❌ No hay datos para exportar')
+      return
+    }
+    
+    try {
+      const vault = JSON.parse(vaultData)
+      // Crear paquete con salt + datos encriptados
+      const exportPackage = {
+        v: 1, // versión del formato
+        s: vault.salt,
+        d: vault.encrypted,
+        t: new Date().toISOString()
       }
       
-      const decrypted = await decrypt(data.encrypted_data, key)
-      return decrypted
+      // Convertir a string compacto
+      const exportString = btoa(JSON.stringify(exportPackage))
+      setExportData(exportString)
+      setTransferStatus(`✅ QR listo (${Math.round(exportString.length/1024*10)/10}KB)`)
     } catch (err) {
-      console.error('Load from cloud error:', err)
-      return null
+      setTransferStatus('❌ Error al exportar')
+      console.error(err)
     }
   }
 
-  // ============================================
-  // PERSISTENCIA
-  // ============================================
-
-  const saveData = useCallback(async (entriesToSave, key, saltBytes) => {
+  const handleImport = async () => {
+    if (!importCode.trim()) {
+      setTransferStatus('❌ Escanea o pega un código')
+      return
+    }
+    
     try {
-      const encryptedData = await encrypt(entriesToSave, key)
+      const importPackage = JSON.parse(atob(importCode.trim()))
+      
+      if (!importPackage.s || !importPackage.d) {
+        throw new Error('Formato inválido')
+      }
+      
+      // Guardar en localStorage con el formato correcto
       const vaultData = {
-        data: encryptedData,
-        salt: btoa(String.fromCharCode(...saltBytes)),
-        updated_at: new Date().toISOString()
+        salt: importPackage.s,
+        encrypted: importPackage.d,
+        updated_at: importPackage.t || new Date().toISOString()
       }
+      
       localStorage.setItem('boveda_vault', JSON.stringify(vaultData))
-      
-      // Sync to cloud
-      if (supabase && key) {
-        await syncToCloud(entriesToSave, saltBytes, key)
-      }
-    } catch (err) {
-      console.error('Error saving:', err)
-      setError('Error al guardar')
-    }
-  }, [cryptoKey])
-
-  // ============================================
-  // SETUP Y UNLOCK
-  // ============================================
-
-  const handleSetup = async (e) => {
-    e.preventDefault()
-    setError('')
-    
-    if (masterPassword.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres')
-      return
-    }
-    
-    if (masterPassword !== confirmPassword) {
-      setError('Las contraseñas no coinciden')
-      return
-    }
-    
-    try {
-      // Verificar si hay datos en la nube (dispositivo vinculado)
-      const userId = localStorage.getItem("boveda_user_id")
-      // debug removed
-      if (userId && supabase) {
-        const { data: cloudData, error: cloudError } = await supabase
-          .from('vaults')
-          .select('encrypted_data, salt, updated_at')
-          .eq('user_id', userId)
-          .maybeSingle()
-        
-        // debug removed
-        // debug removed
-        // debug removed
-        
-        if (cloudData && cloudData.encrypted_data) {
-          // Hay datos en la nube, intentar descifrar con la contraseña ingresada
-          try {
-            const cloudSalt = Uint8Array.from(atob(cloudData.salt), c => c.charCodeAt(0))
-            const cloudKey = await deriveKey(masterPassword, cloudSalt)
-            const cloudEntries = await decrypt(cloudData.encrypted_data, cloudKey)
-            
-            // ¡Éxito! Guardar localmente y desbloquear
-            const encryptedData = await encrypt(cloudEntries, cloudKey)
-            const vaultData = {
-              data: encryptedData,
-              salt: cloudData.salt,
-              updated_at: cloudData.updated_at
-            }
-            localStorage.setItem('boveda_vault', JSON.stringify(vaultData))
-            
-            setSalt(cloudSalt)
-            setCryptoKey(cloudKey)
-            setEntries(cloudEntries)
-            setIsLocked(false)
-            setHasVault(true)
-            setMasterPassword('')
-            setConfirmPassword('')
-            setSyncStatus('✓ Sincronizado desde nube')
-            setTimeout(() => setSyncStatus(''), 2000)
-            return
-          } catch (decryptErr) {
-            setError('Contraseña incorrecta. Usa la misma del otro dispositivo.')
-            return
-          }
-        }
-      }
-      
-      // No hay datos en la nube, crear bóveda nueva
-      const newSalt = generateSalt()
-      const key = await deriveKey(masterPassword, newSalt)
-      
-      setSalt(newSalt)
-      setCryptoKey(key)
-      setEntries([])
-      setIsLocked(false)
       setHasVault(true)
-      setMasterPassword('')
-      setConfirmPassword('')
-      setShowMasterPassword(false)
-      setShowConfirmPassword(false)
+      setShowTransfer(false)
+      setImportCode('')
+      stopScanner()
       
-      await saveData([], key, newSalt)
+      alert('✅ Datos importados. Ahora desbloquea con tu contraseña maestra.')
     } catch (err) {
-      setError('Error al crear la bóveda')
+      setTransferStatus('❌ Código inválido')
       console.error(err)
     }
   }
 
-  const handleUnlock = async (e) => {
-    e.preventDefault()
-    setError('')
-    
-    try {
-      const stored = localStorage.getItem('boveda_vault')
-      if (!stored) {
-        setError('No hay bóveda guardada')
-        return
-      }
-      
-      const vaultData = JSON.parse(stored)
-      const saltBytes = Uint8Array.from(atob(vaultData.salt), c => c.charCodeAt(0))
-      const key = await deriveKey(masterPassword, saltBytes)
-      
-      // Primero intentar descifrar local para validar password
-      let decryptedEntries = await decrypt(vaultData.data, key)
-      
-      // Luego intentar cargar de la nube si hay datos más recientes
-      const cloudEntries = await loadFromCloud(key, saltBytes)
-      if (cloudEntries) {
-        decryptedEntries = cloudEntries
-        // Actualizar local con datos de la nube
-        const encryptedData = await encrypt(cloudEntries, key)
-        const newVaultData = {
-          data: encryptedData,
-          salt: vaultData.salt,
-          updated_at: new Date().toISOString()
-        }
-        localStorage.setItem('boveda_vault', JSON.stringify(newVaultData))
-        setSyncStatus('✓ Sincronizado desde nube')
-        setTimeout(() => setSyncStatus(''), 2000)
-      }
-      
-      setSalt(saltBytes)
-      setCryptoKey(key)
-      setEntries(decryptedEntries)
-      setIsLocked(false)
-      setMasterPassword('')
-      setShowMasterPassword(false)
-      setLastActivity(Date.now())
-      setDeviceId(getUserId())
-    } catch (err) {
-      setError('Contraseña incorrecta')
-      console.error(err)
-    }
-  }
-
-  const handleLock = () => {
-    setIsLocked(true)
-    setCryptoKey(null)
-    setEntries([])
-    setShowForm(false)
-    setEditingId(null)
-    setVisiblePasswords({})
-  }
-
-  const handleLinkDevice = async (newUserId) => {
-    if (!newUserId || newUserId.trim() === "") return
-    
-    // Guardar el nuevo user_id
-    // debug removed
-    localStorage.setItem("boveda_user_id", newUserId.trim())
-    // debug removed
-    
-    // IMPORTANTE: Borrar vault local para que descargue de la nube
-    localStorage.removeItem("boveda_vault")
-    setHasVault(false)
-    
-    // Recargar la app para que tome el nuevo ID
-    setShowLinkDevice(false)
-    setLinkCode("")
-    setShowScanner(false)
-    stopScanner()
-    handleLock()
-    alert("Dispositivo vinculado. Ahora crea tu bóveda con la MISMA contraseña maestra del otro dispositivo.")
-  }
-  const html5QrCodeRef = useRef(null)
+  // ============================================
+  // SCANNER FUNCTIONS
+  // ============================================
 
   const startScanner = async () => {
     try {
@@ -452,15 +288,16 @@ export default function Boveda() {
       if (html5QrCodeRef.current) {
         try { await html5QrCodeRef.current.stop() } catch(e) {}
       }
-      const html5QrCode = new Html5Qrcode("qr-reader")
+      const html5QrCode = new Html5Qrcode("qr-reader-transfer")
       html5QrCodeRef.current = html5QrCode
       await html5QrCode.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 200, height: 200 } },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
         (decodedText) => {
-          setLinkCode(decodedText)
+          setImportCode(decodedText)
           stopScanner()
           setShowScanner(false)
+          setTransferStatus('✅ QR escaneado')
         },
         () => {}
       )
@@ -481,170 +318,153 @@ export default function Boveda() {
   }
 
   useEffect(() => {
-    if (showScanner) {
+    if (showScanner && transferMode === 'import') {
       const timer = setTimeout(() => {
-        const el = document.getElementById("qr-reader")
+        const el = document.getElementById("qr-reader-transfer")
         if (el) startScanner()
       }, 500)
       return () => clearTimeout(timer)
     } else {
       stopScanner()
     }
-  }, [showScanner])
+  }, [showScanner, transferMode])
 
+  // ============================================
+  // VAULT FUNCTIONS
+  // ============================================
 
-
-  const handleChangePassword = async (e) => {
+  const handleSetup = async (e) => {
     e.preventDefault()
-    setChangePwdError("")
+    setError('')
     
-    // Validaciones
-    if (newPwd.length < 8) {
-      setChangePwdError("La nueva contraseña debe tener al menos 8 caracteres")
-      return
-    }
-    if (newPwd !== confirmNewPwd) {
-      setChangePwdError("Las contraseñas no coinciden")
+    if (masterPassword.length < 4) {
+      setError('Mínimo 4 caracteres')
       return
     }
     
+    if (masterPassword !== confirmPassword) {
+      setError('Las contraseñas no coinciden')
+      return
+    }
+
     try {
-      // Verificar contraseña actual
-      const stored = localStorage.getItem("boveda_vault")
-      const vaultData = JSON.parse(stored)
-      const currentSalt = Uint8Array.from(atob(vaultData.salt), c => c.charCodeAt(0))
-      const currentKey = await deriveKey(currentPwd, currentSalt)
-      
-      // Intentar descifrar para verificar
-      await decrypt(vaultData.data, currentKey)
-      
-      // Generar nuevo salt y key
       const newSalt = generateSalt()
-      const newKey = await deriveKey(newPwd, newSalt)
+      const key = await deriveKey(masterPassword, newSalt)
       
-      // Re-encriptar con la nueva key
-      const encryptedData = await encrypt(entries, newKey)
-      const newVaultData = {
-        data: encryptedData,
+      const vaultData = {
         salt: btoa(String.fromCharCode(...newSalt)),
+        encrypted: await encrypt([], key),
         updated_at: new Date().toISOString()
       }
-      localStorage.setItem("boveda_vault", JSON.stringify(newVaultData))
       
-      // Actualizar estados
+      localStorage.setItem('boveda_vault', JSON.stringify(vaultData))
+      
       setSalt(newSalt)
-      setCryptoKey(newKey)
-      
-      // Sync a la nube
-      if (supabase) {
-        await syncToCloud(entries, newSalt, newKey)
-      }
-      
-      // Limpiar y cerrar
-      setCurrentPwd("")
-      setNewPwd("")
-      setConfirmNewPwd("")
-      setShowChangePassword(false)
-      alert("Contraseña cambiada exitosamente!")
+      setCryptoKey(key)
+      setEntries([])
+      setHasVault(true)
+      setIsLocked(false)
+      setMasterPassword('')
+      setConfirmPassword('')
     } catch (err) {
-      setChangePwdError("Contraseña actual incorrecta")
+      setError('Error al crear bóveda')
       console.error(err)
     }
   }
 
-  // ============================================
-  // AUTO-LOCK
-  // ============================================
+  const handleUnlock = async (e) => {
+    e.preventDefault()
+    setError('')
 
-  useEffect(() => {
-    if (isLocked) return
+    try {
+      const vaultData = JSON.parse(localStorage.getItem('boveda_vault'))
+      const saltBytes = Uint8Array.from(atob(vaultData.salt), c => c.charCodeAt(0))
+      const key = await deriveKey(masterPassword, saltBytes)
+      
+      const decryptedEntries = await decrypt(vaultData.encrypted, key)
+      
+      setSalt(saltBytes)
+      setCryptoKey(key)
+      setEntries(decryptedEntries)
+      setIsLocked(false)
+      setMasterPassword('')
+      setLastActivity(Date.now())
+      setSyncStatus('✓ Desbloqueado')
+      setTimeout(() => setSyncStatus(''), 2000)
+    } catch (err) {
+      setError('Contraseña incorrecta')
+    }
+  }
+
+  const handleLock = () => {
+    setIsLocked(true)
+    setCryptoKey(null)
+    setEntries([])
+    setSearchTerm('')
+    setShowForm(false)
+    setEditingId(null)
+    setVisiblePasswords({})
+  }
+
+  const saveEntries = async (newEntries) => {
+    if (!cryptoKey || !salt) return
     
-    const resetActivity = () => setLastActivity(Date.now())
-    
-    window.addEventListener('mousemove', resetActivity)
-    window.addEventListener('keydown', resetActivity)
-    window.addEventListener('click', resetActivity)
-    
-    const interval = setInterval(() => {
-      if (Date.now() - lastActivity > AUTO_LOCK_MINUTES * 60 * 1000) {
-        handleLock()
+    try {
+      const encrypted = await encrypt(newEntries, cryptoKey)
+      const vaultData = {
+        salt: btoa(String.fromCharCode(...salt)),
+        encrypted: encrypted,
+        updated_at: new Date().toISOString()
       }
-    }, 10000)
-    
-    return () => {
-      window.removeEventListener('mousemove', resetActivity)
-      window.removeEventListener('keydown', resetActivity)
-      window.removeEventListener('click', resetActivity)
-      clearInterval(interval)
+      localStorage.setItem('boveda_vault', JSON.stringify(vaultData))
+      setEntries(newEntries)
+    } catch (err) {
+      console.error('Error saving:', err)
     }
-  }, [isLocked, lastActivity])
+  }
 
-  useEffect(() => {
-    const stored = localStorage.getItem('boveda_vault')
-    setHasVault(!!stored)
-    // Asegurar que siempre hay un deviceId
-    let uid = localStorage.getItem("boveda_user_id")
-    if (!uid) {
-      uid = "user_" + Date.now().toString(36) + Math.random().toString(36).substr(2)
-      localStorage.setItem("boveda_user_id", uid)
-    }
-    setDeviceId(uid)
-  }, [])
-
-  // ============================================
-  // CRUD ENTRIES
-  // ============================================
-
-  const handleSaveEntry = async (e) => {
+  const handleAddEntry = async (e) => {
     e.preventDefault()
     
-    let newEntries
-    const now = new Date().toISOString()
+    if (!formData.name || !formData.password) return
     
+    const newEntry = {
+      id: editingId || generateId(),
+      ...formData,
+      createdAt: editingId ? entries.find(e => e.id === editingId)?.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    
+    let newEntries
     if (editingId) {
-      newEntries = entries.map(entry => 
-        entry.id === editingId 
-          ? { ...entry, ...formData, updatedAt: now }
-          : entry
-      )
+      newEntries = entries.map(e => e.id === editingId ? newEntry : e)
     } else {
-      const newEntry = {
-        id: generateId(),
-        ...formData,
-        createdAt: now,
-        updatedAt: now
-      }
       newEntries = [...entries, newEntry]
     }
     
-    setEntries(newEntries)
-    await saveData(newEntries, cryptoKey, salt)
+    await saveEntries(newEntries)
     
+    setFormData({ name: '', username: '', password: '', url: '', notes: '' })
     setShowForm(false)
     setEditingId(null)
-    setShowFormPassword(false)
-    setFormData({ name: '', username: '', password: '', url: '', notes: '' })
   }
 
   const handleEdit = (entry) => {
     setFormData({
       name: entry.name,
-      username: entry.username,
+      username: entry.username || '',
       password: entry.password,
       url: entry.url || '',
       notes: entry.notes || ''
     })
     setEditingId(entry.id)
-    setShowFormPassword(false)
     setShowForm(true)
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar esta entrada?')) return
-    
+    if (!confirm('¿Eliminar esta contraseña?')) return
     const newEntries = entries.filter(e => e.id !== id)
-    setEntries(newEntries)
-    await saveData(newEntries, cryptoKey, salt)
+    await saveEntries(newEntries)
   }
 
   const handleCopy = async (text, id) => {
@@ -653,288 +473,386 @@ export default function Boveda() {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const handleGeneratePassword = () => {
-    setFormData({ ...formData, password: generatePassword() })
-    setShowFormPassword(true)
-  }
-
   const togglePasswordVisibility = (id) => {
     setVisiblePasswords(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
+  const handleChangePassword = async (e) => {
+    e.preventDefault()
+    setChangePwdError("")
+    
+    if (newPwd.length < 4) {
+      setChangePwdError("Mínimo 4 caracteres")
+      return
+    }
+    
+    if (newPwd !== confirmNewPwd) {
+      setChangePwdError("Las contraseñas no coinciden")
+      return
+    }
+    
+    try {
+      const vaultData = JSON.parse(localStorage.getItem('boveda_vault'))
+      const oldSaltBytes = Uint8Array.from(atob(vaultData.salt), c => c.charCodeAt(0))
+      const oldKey = await deriveKey(currentPwd, oldSaltBytes)
+      await decrypt(vaultData.encrypted, oldKey)
+      
+      const newSalt = generateSalt()
+      const newKey = await deriveKey(newPwd, newSalt)
+      const newEncrypted = await encrypt(entries, newKey)
+      
+      const newVaultData = {
+        salt: btoa(String.fromCharCode(...newSalt)),
+        encrypted: newEncrypted,
+        updated_at: new Date().toISOString()
+      }
+      localStorage.setItem('boveda_vault', JSON.stringify(newVaultData))
+      
+      setSalt(newSalt)
+      setCryptoKey(newKey)
+      setShowChangePassword(false)
+      setCurrentPwd("")
+      setNewPwd("")
+      setConfirmNewPwd("")
+      alert("✅ Contraseña cambiada")
+    } catch (err) {
+      setChangePwdError("Contraseña actual incorrecta")
+    }
+  }
+
+  const handleDeleteVault = () => {
+    if (!confirm('⚠️ ¿Eliminar TODA la bóveda? Esta acción no se puede deshacer.')) return
+    if (!confirm('¿Estás seguro? Se perderán todas las contraseñas.')) return
+    
+    localStorage.removeItem('boveda_vault')
+    localStorage.removeItem('boveda_user_id')
+    setHasVault(false)
+    setIsLocked(true)
+    setEntries([])
+    setCryptoKey(null)
+    setSalt(null)
+  }
+
   const filteredEntries = entries.filter(entry =>
     entry.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    entry.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (entry.url && entry.url.toLowerCase().includes(searchTerm.toLowerCase()))
+    (entry.username && entry.username.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
   // ============================================
-  // RENDER: LOCKED / SETUP
+  // RENDER - LOCKED STATE
   // ============================================
 
   if (isLocked) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
+      <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-4 flex flex-col items-center justify-center">
+        <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <div className="text-6xl mb-4">🔐</div>
             <h1 className="text-3xl font-bold">Bóveda</h1>
-            <p className="text-gray-400 mt-2">Contraseñas seguras con sync ☁️</p>
+            <p className="text-gray-400 mt-1">Gestor de contraseñas seguro</p>
           </div>
+
+          {!hasVault ? (
+            <form onSubmit={handleSetup} className="space-y-4">
+              <p className="text-center text-gray-400 text-sm mb-4">
+                Crea tu contraseña maestra
+              </p>
+              
+              <div className="relative">
+                <input
+                  type={showMasterPassword ? "text" : "password"}
+                  placeholder="Contraseña maestra"
+                  value={masterPassword}
+                  onChange={(e) => setMasterPassword(e.target.value)}
+                  className="w-full bg-gray-800 rounded-xl px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowMasterPassword(!showMasterPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  {showMasterPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
+              
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  placeholder="Confirmar contraseña"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-gray-800 rounded-xl px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  {showConfirmPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
+              
+              {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+              
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium transition-colors"
+              >
+                Crear Bóveda
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => { setShowTransfer(true); setTransferMode('import'); }}
+                className="w-full bg-gray-700 hover:bg-gray-600 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                📥 Importar desde otro dispositivo
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleUnlock} className="space-y-4">
+              <div className="relative">
+                <input
+                  type={showMasterPassword ? "text" : "password"}
+                  placeholder="Contraseña maestra"
+                  value={masterPassword}
+                  onChange={(e) => setMasterPassword(e.target.value)}
+                  className="w-full bg-gray-800 rounded-xl px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowMasterPassword(!showMasterPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  {showMasterPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
+              
+              {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+              
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium transition-colors"
+              >
+                🔓 Desbloquear
+              </button>
+            </form>
+          )}
 
           {/* Install App Button */}
           {showInstall && (
             <button
               onClick={installApp}
-              className="w-full bg-green-600 hover:bg-green-500 rounded-xl p-4 mb-4 flex items-center justify-center gap-2 transition-colors"
+              className="w-full mt-4 bg-green-600 hover:bg-green-700 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2"
             >
-              <span className="text-xl">📲</span>
+              <span>📲</span>
               <span className="font-semibold">Instalar App</span>
             </button>
           )}
-          
-          <div className="bg-gray-900 rounded-2xl p-6">
-            {hasVault ? (
-              <form onSubmit={handleUnlock}>
-                <label className="block text-sm text-gray-400 mb-2">
-                  Contraseña maestra
-                </label>
-                <div className="relative mb-4">
-                  <input
-                    type={showMasterPassword ? 'text' : 'password'}
-                    value={masterPassword}
-                    onChange={(e) => setMasterPassword(e.target.value)}
-                    className="w-full bg-gray-800 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="••••••••"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowMasterPassword(!showMasterPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showMasterPassword ? '🙈' : '👁️'}
-                  </button>
-                </div>
-                {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
-                <button
-                  type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 rounded-lg py-3 font-medium transition-colors"
-                >
-                  Desbloquear
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleSetup}>
-                <p className="text-gray-400 text-sm mb-4">
-                  Crea tu contraseña maestra. Esta será la única contraseña que necesitarás recordar.
-                </p>
-                <label className="block text-sm text-gray-400 mb-2">
-                  Contraseña maestra
-                </label>
-                <div className="relative mb-4">
-                  <input
-                    type={showMasterPassword ? 'text' : 'password'}
-                    value={masterPassword}
-                    onChange={(e) => setMasterPassword(e.target.value)}
-                    className="w-full bg-gray-800 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Mínimo 8 caracteres"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowMasterPassword(!showMasterPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showMasterPassword ? '🙈' : '👁️'}
-                  </button>
-                </div>
-                <label className="block text-sm text-gray-400 mb-2">
-                  Confirmar contraseña
-                </label>
-                <div className="relative mb-4">
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-gray-800 rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Repite la contraseña"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showConfirmPassword ? '🙈' : '👁️'}
-                  </button>
-                </div>
-                {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
-                <button
-                  type="submit"
-                  className="w-full bg-green-600 hover:bg-green-700 rounded-lg py-3 font-medium transition-colors"
-                >
-                  Crear Bóveda
-                </button>
-              </form>
-            )}
+
+          <div className="text-center text-gray-600 text-xs mt-8">
+            <p>Creado por C19 Sage | Colmena 2026</p>
           </div>
-          
-          <p className="text-center text-gray-600 text-xs mt-6">
-            Encriptación local + sync seguro en la nube
-          </p>
         </div>
+
+        {/* Transfer Modal (Import mode from locked state) */}
+        {showTransfer && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
+              <h2 className="text-xl font-bold mb-4 text-center">📥 Importar Bóveda</h2>
+              
+              <p className="text-gray-400 text-sm text-center mb-4">
+                Escanea el QR del dispositivo que tiene tus contraseñas
+              </p>
+              
+              {!showScanner ? (
+                <button
+                  onClick={() => setShowScanner(true)}
+                  className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2 mb-4"
+                >
+                  📷 Escanear QR
+                </button>
+              ) : (
+                <div className="mb-4">
+                  <div id="qr-reader-transfer" className="w-full bg-gray-800 rounded-xl overflow-hidden" style={{ minHeight: "280px" }}></div>
+                  <button
+                    onClick={startScanner}
+                    className="w-full mt-2 bg-green-600 hover:bg-green-500 rounded-lg py-2 text-sm"
+                  >
+                    🔄 Reiniciar cámara
+                  </button>
+                </div>
+              )}
+              
+              <div className="border-t border-gray-700 pt-4 mt-4">
+                <p className="text-xs text-gray-400 mb-2">O pega el código:</p>
+                <textarea
+                  placeholder="Pega aquí el código exportado..."
+                  value={importCode}
+                  onChange={(e) => setImportCode(e.target.value)}
+                  className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-20 resize-none"
+                />
+                <button
+                  onClick={handleImport}
+                  disabled={!importCode.trim()}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:opacity-50 rounded-lg py-2 font-medium"
+                >
+                  Importar
+                </button>
+              </div>
+              
+              {transferStatus && (
+                <p className="text-center text-sm mt-3">{transferStatus}</p>
+              )}
+              
+              <button
+                onClick={() => { setShowTransfer(false); setImportCode(''); setShowScanner(false); stopScanner(); setTransferStatus(''); }}
+                className="w-full mt-4 bg-gray-700 hover:bg-gray-600 rounded-lg py-2"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     )
   }
 
   // ============================================
-  // RENDER: UNLOCKED
+  // RENDER - UNLOCKED STATE
   // ============================================
 
   return (
-    <main className="min-h-screen p-4 max-w-2xl mx-auto">
+    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-4 pb-24">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">🔓</span>
-          <h1 className="text-xl font-bold">Bóveda</h1>
-          {syncStatus && (
-            <span className="text-xs text-green-400">{syncStatus}</span>
-          )}
-          {syncing && (
-            <span className="text-xs text-gray-400">☁️ Sincronizando...</span>
-          )}
+        <div>
+          <h1 className="text-2xl font-bold">🔐 Bóveda</h1>
+          {syncStatus && <p className="text-xs text-green-400">{syncStatus}</p>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2">
+          {/* Install App Button (unlocked) */}
           {showInstall && (
             <button
               onClick={installApp}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="bg-green-600 hover:bg-green-700 rounded-lg p-2 transition-colors"
               title="Instalar App"
             >
               📲
             </button>
           )}
           <button
-            onClick={() => setShowChangePassword(true)}
-            className="text-gray-400 hover:text-white transition-colors"
-            title="Cambiar contraseña"
+            onClick={() => { setShowTransfer(true); setTransferMode('export'); handleExport(); }}
+            className="bg-purple-600 hover:bg-purple-700 rounded-lg p-2 transition-colors"
+            title="Exportar/Importar"
           >
-            🔑
+            🔄
           </button>
           <button
-            onClick={() => setShowLinkDevice(true)}
-            className="text-gray-400 hover:text-white transition-colors"
-            title="Vincular dispositivo"
+            onClick={() => setShowChangePassword(true)}
+            className="bg-gray-700 hover:bg-gray-600 rounded-lg p-2 transition-colors"
+            title="Cambiar contraseña"
           >
-            🔗
+            ⚙️
           </button>
           <button
             onClick={handleLock}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="bg-red-600 hover:bg-red-700 rounded-lg p-2 transition-colors"
+            title="Bloquear"
           >
-            🔒 Bloquear
+            🔒
           </button>
         </div>
       </div>
 
-      {/* Search + Add */}
-      <div className="flex gap-2 mb-4">
+      {/* Search */}
+      <div className="relative mb-4">
         <input
           type="text"
-          placeholder="Buscar..."
+          placeholder="🔍 Buscar..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="flex-1 bg-gray-900 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full bg-gray-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <button
-          onClick={() => {
-            setFormData({ name: '', username: '', password: '', url: '', notes: '' })
-            setEditingId(null)
-            setShowFormPassword(false)
-            setShowForm(true)
-          }}
-          className="bg-blue-600 hover:bg-blue-700 rounded-lg px-4 py-2 font-medium transition-colors"
-        >
-          + Agregar
-        </button>
       </div>
 
-      {/* Entry Form Modal */}
+      {/* Add Button */}
+      <button
+        onClick={() => { setShowForm(true); setEditingId(null); setFormData({ name: '', username: '', password: '', url: '', notes: '' }); }}
+        className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium mb-4 transition-colors"
+      >
+        + Agregar Contraseña
+      </button>
+
+      {/* Add/Edit Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-md">
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
             <h2 className="text-xl font-bold mb-4">
-              {editingId ? 'Editar' : 'Nueva entrada'}
+              {editingId ? '✏️ Editar' : '➕ Nueva Contraseña'}
             </h2>
-            <form onSubmit={handleSaveEntry}>
-              <div className="space-y-3">
+            <form onSubmit={handleAddEntry} className="space-y-3">
+              <input
+                type="text"
+                placeholder="Nombre (ej: Gmail, Netflix)"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+              <input
+                type="text"
+                placeholder="Usuario o email"
+                value={formData.username}
+                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="relative">
                 <input
-                  type="text"
-                  placeholder="Nombre (ej: Gmail)"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  type={showFormPassword ? "text" : "password"}
+                  placeholder="Contraseña"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full bg-gray-800 rounded-lg px-4 py-2 pr-20 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
-                <input
-                  type="text"
-                  placeholder="Usuario / Email"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type={showFormPassword ? 'text' : 'password'}
-                      placeholder="Contraseña"
-                      value={formData.password}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      className="w-full bg-gray-800 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowFormPassword(!showFormPassword)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                    >
-                      {showFormPassword ? '🙈' : '👁️'}
-                    </button>
-                  </div>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
                   <button
                     type="button"
-                    onClick={handleGeneratePassword}
-                    className="bg-gray-700 hover:bg-gray-600 rounded-lg px-3 transition-colors"
-                    title="Generar contraseña"
+                    onClick={() => setShowFormPassword(!showFormPassword)}
+                    className="text-gray-400 hover:text-white p-1"
+                  >
+                    {showFormPassword ? '🙈' : '👁️'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, password: generatePassword() })}
+                    className="text-gray-400 hover:text-white p-1"
+                    title="Generar"
                   >
                     🎲
                   </button>
                 </div>
-                <input
-                  type="url"
-                  placeholder="URL (opcional)"
-                  value={formData.url}
-                  onChange={(e) => setFormData({ ...formData, url: e.target.value })}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <textarea
-                  placeholder="Notas (opcional)"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  rows={2}
-                />
               </div>
-              <div className="flex gap-2 mt-4">
+              <input
+                type="url"
+                placeholder="URL (opcional)"
+                value={formData.url}
+                onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <textarea
+                placeholder="Notas (opcional)"
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-20"
+              />
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowForm(false)
-                    setEditingId(null)
-                    setShowFormPassword(false)
-                  }}
+                  onClick={() => { setShowForm(false); setEditingId(null); }}
                   className="flex-1 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
                 >
                   Cancelar
@@ -943,7 +861,7 @@ export default function Boveda() {
                   type="submit"
                   className="flex-1 bg-blue-600 hover:bg-blue-700 rounded-lg py-2 font-medium transition-colors"
                 >
-                  Guardar
+                  {editingId ? 'Guardar' : 'Agregar'}
                 </button>
               </div>
             </form>
@@ -955,48 +873,38 @@ export default function Boveda() {
       {showChangePassword && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
-            <h2 className="text-xl font-bold mb-4 text-center">🔑 Cambiar Contraseña</h2>
-            <form onSubmit={handleChangePassword}>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Contraseña actual</label>
-                  <input
-                    type="password"
-                    value={currentPwd}
-                    onChange={(e) => setCurrentPwd(e.target.value)}
-                    className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="••••••••"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Nueva contraseña</label>
-                  <input
-                    type="password"
-                    value={newPwd}
-                    onChange={(e) => setNewPwd(e.target.value)}
-                    className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Mínimo 8 caracteres"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Confirmar nueva contraseña</label>
-                  <input
-                    type="password"
-                    value={confirmNewPwd}
-                    onChange={(e) => setConfirmNewPwd(e.target.value)}
-                    className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Repite la nueva contraseña"
-                    required
-                  />
-                </div>
-              </div>
-              {changePwdError && <p className="text-red-400 text-sm mt-3">{changePwdError}</p>}
-              <div className="flex gap-2 mt-4">
+            <h2 className="text-xl font-bold mb-4">🔑 Cambiar Contraseña</h2>
+            <form onSubmit={handleChangePassword} className="space-y-3">
+              <input
+                type="password"
+                placeholder="Contraseña actual"
+                value={currentPwd}
+                onChange={(e) => setCurrentPwd(e.target.value)}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Nueva contraseña"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Confirmar nueva"
+                value={confirmNewPwd}
+                onChange={(e) => setConfirmNewPwd(e.target.value)}
+                className="w-full bg-gray-800 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+              {changePwdError && <p className="text-red-400 text-sm">{changePwdError}</p>}
+              
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => { setShowChangePassword(false); setCurrentPwd(""); setNewPwd(""); setConfirmNewPwd(""); setChangePwdError(""); }}
+                  onClick={() => { setShowChangePassword(false); setCurrentPwd(''); setNewPwd(''); setConfirmNewPwd(''); setChangePwdError(''); }}
                   className="flex-1 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
                 >
                   Cancelar
@@ -1008,80 +916,116 @@ export default function Boveda() {
                   Cambiar
                 </button>
               </div>
+              
+              <button
+                type="button"
+                onClick={handleDeleteVault}
+                className="w-full mt-4 bg-red-900/50 hover:bg-red-900 text-red-400 rounded-lg py-2 text-sm transition-colors"
+              >
+                🗑️ Eliminar toda la bóveda
+              </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Link Device Modal */}
-      {showLinkDevice && (
+      {/* Transfer Modal (Export/Import) */}
+      {showTransfer && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm text-center">
-            <h2 className="text-xl font-bold mb-4">🔗 Vincular Dispositivo</h2>
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
+            <h2 className="text-xl font-bold mb-4 text-center">🔄 Transferir Bóveda</h2>
             
-            {/* Toggle buttons */}
+            {/* Toggle */}
             <div className="flex gap-2 mb-4">
               <button
-                onClick={() => setShowScanner(false)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${!showScanner ? 'bg-blue-600' : 'bg-gray-700'}`}
+                onClick={() => { setTransferMode('export'); handleExport(); }}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${transferMode === 'export' ? 'bg-purple-600' : 'bg-gray-700'}`}
               >
-                Mostrar QR
+                📤 Exportar
               </button>
               <button
-                onClick={() => setShowScanner(true)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${showScanner ? 'bg-blue-600' : 'bg-gray-700'}`}
+                onClick={() => { setTransferMode('import'); setShowScanner(false); }}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${transferMode === 'import' ? 'bg-purple-600' : 'bg-gray-700'}`}
               >
-                📷 Escanear
+                📥 Importar
               </button>
             </div>
             
-            {/* QR Display */}
-            {!showScanner && deviceId && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 mb-3">Escanea desde el otro dispositivo:</p>
-                <div className="bg-white p-4 rounded-xl inline-block">
-                  <QRCodeSVG value={deviceId} size={180} level="M" />
+            {transferMode === 'export' ? (
+              <div>
+                <p className="text-gray-400 text-sm text-center mb-4">
+                  Escanea este QR desde el otro dispositivo
+                </p>
+                {exportData ? (
+                  <div className="flex flex-col items-center">
+                    <div className="bg-white p-4 rounded-xl mb-4">
+                      <QRCodeSVG value={exportData} size={220} level="L" />
+                    </div>
+                    <p className="text-xs text-gray-500 mb-2">
+                      {entries.length} contraseña(s) · {Math.round(exportData.length/1024*10)/10}KB
+                    </p>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(exportData); setTransferStatus('✅ Código copiado'); }}
+                      className="text-sm text-blue-400 hover:text-blue-300"
+                    >
+                      📋 Copiar código
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500">Generando QR...</p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <p className="text-gray-400 text-sm text-center mb-4">
+                  Escanea el QR del otro dispositivo
+                </p>
+                
+                {!showScanner ? (
+                  <button
+                    onClick={() => setShowScanner(true)}
+                    className="w-full bg-blue-600 hover:bg-blue-700 rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2 mb-4"
+                  >
+                    📷 Escanear QR
+                  </button>
+                ) : (
+                  <div className="mb-4">
+                    <div id="qr-reader-transfer" className="w-full bg-gray-800 rounded-xl overflow-hidden" style={{ minHeight: "280px" }}></div>
+                    <button
+                      onClick={startScanner}
+                      className="w-full mt-2 bg-green-600 hover:bg-green-500 rounded-lg py-2 text-sm"
+                    >
+                      🔄 Reiniciar cámara
+                    </button>
+                  </div>
+                )}
+                
+                <div className="border-t border-gray-700 pt-4 mt-4">
+                  <p className="text-xs text-gray-400 mb-2">O pega el código:</p>
+                  <textarea
+                    placeholder="Pega aquí..."
+                    value={importCode}
+                    onChange={(e) => setImportCode(e.target.value)}
+                    className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={handleImport}
+                    disabled={!importCode.trim()}
+                    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:opacity-50 rounded-lg py-2 font-medium"
+                  >
+                    Importar (reemplaza todo)
+                  </button>
                 </div>
               </div>
             )}
             
-            {/* Scanner */}
-            {showScanner && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 mb-3">Apunta al QR del otro dispositivo:</p>
-                <div id="qr-reader" className="w-full bg-gray-800 rounded-xl overflow-hidden" style={{ minHeight: "280px" }}></div>
-                <button
-                  type="button"
-                  onClick={startScanner}
-                  className="mt-2 w-full bg-green-600 hover:bg-green-500 rounded-lg py-2 text-sm transition-colors"
-                >
-                  🔄 Iniciar cámara
-                </button>
-              </div>
+            {transferStatus && (
+              <p className="text-center text-sm mt-3">{transferStatus}</p>
             )}
             
-            {/* Manual input */}
-            <div className="border-t border-gray-700 pt-4 mt-4">
-              <p className="text-xs text-gray-400 mb-2">O pega un código:</p>
-              <input
-                type="text"
-                placeholder="Código del otro dispositivo"
-                value={linkCode}
-                onChange={(e) => setLinkCode(e.target.value)}
-                className="w-full bg-gray-800 rounded-lg px-4 py-2 mb-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                onClick={() => { handleLinkDevice(linkCode); stopScanner(); }}
-                disabled={!linkCode.trim()}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:opacity-50 rounded-lg py-2 font-medium transition-colors"
-              >
-                Vincular
-              </button>
-            </div>
-            
             <button
-              onClick={() => { setShowLinkDevice(false); setLinkCode(""); setShowScanner(false); stopScanner(); }}
-              className="w-full mt-4 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 transition-colors"
+              onClick={() => { setShowTransfer(false); setExportData(''); setImportCode(''); setShowScanner(false); stopScanner(); setTransferStatus(''); }}
+              className="w-full mt-4 bg-gray-700 hover:bg-gray-600 rounded-lg py-2"
             >
               Cerrar
             </button>
@@ -1089,7 +1033,7 @@ export default function Boveda() {
         </div>
       )}
 
-      {/* QR Modal */}
+      {/* QR Entry Modal */}
       {qrEntry && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm text-center">
@@ -1148,17 +1092,17 @@ export default function Boveda() {
                     onClick={() => handleCopy(entry.password, entry.id)}
                     className={`p-2 rounded-lg transition-colors ${
                       copiedId === entry.id 
-                        ? 'bg-green-600 text-white' 
+                        ? 'bg-green-600' 
                         : 'bg-gray-700 hover:bg-gray-600'
                     }`}
-                    title="Copiar contraseña"
+                    title="Copiar"
                   >
                     {copiedId === entry.id ? '✓' : '📋'}
                   </button>
                   <button
                     onClick={() => setQrEntry(entry)}
-                    className="p-2 bg-gray-700 hover:bg-purple-600 rounded-lg transition-colors"
-                    title="Mostrar QR"
+                    className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                    title="QR"
                   >
                     📱
                   </button>
@@ -1179,11 +1123,11 @@ export default function Boveda() {
                 </div>
               </div>
               {entry.url && (
-                <a 
-                  href={entry.url} 
-                  target="_blank" 
+                <a
+                  href={entry.url}
+                  target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 text-xs hover:underline block mt-1 truncate"
+                  className="text-blue-400 text-xs mt-2 block truncate hover:underline"
                 >
                   {entry.url}
                 </a>
@@ -1195,8 +1139,8 @@ export default function Boveda() {
 
       {/* Footer */}
       <div className="text-center text-gray-600 text-xs mt-8">
-        <p>Auto-bloqueo en {AUTO_LOCK_MINUTES} min · Sync ☁️ activo</p>
-        <p className="mt-1">Creado por C-Cloud | Colmena 2026</p>
+        <p>Auto-bloqueo en {AUTO_LOCK_MINUTES} min</p>
+        <p className="mt-1">Creado por C19 Sage | Colmena 2026</p>
       </div>
     </main>
   )
